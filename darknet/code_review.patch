@@ -1,0 +1,674 @@
+diff --git a/cfg/yolov1/yolo.train.cfg b/cfg/yolov1/yolo.train.cfg
+index 01aeb5e..8bade56 100644
+--- a/cfg/yolov1/yolo.train.cfg
++++ b/cfg/yolov1/yolo.train.cfg
+@@ -1,6 +1,17 @@
+ [net]
+-batch=64
+-subdivisions=4
++# [Lucas review] in YOLO, official batch size is batch x subdivision.
++# but author split the batch into 2 factors, namely, batch and subdivision.
++# batch determine the number of sampes into the same tranning process.
++# the same meaning as the 'batch'
++# subdivision is used to split batch into several parts and goes difference round with each other.
++# for example:
++# batch = 64 and subdivisions = 4, then batches are issuesed to 
++# tranning process for 4 round and each round with 16 samples.
++ 
++
++batch=1
++subdivisions=1 # subdivisions of a batch, in this case, b=16, sub=4
++
+ height=448
+ width=448
+ channels=3
+@@ -14,7 +25,7 @@ learning_rate=0.0005
+ policy=steps
+ steps=200,400,600,20000,30000
+ scales=2.5,2,2,.1,.1
+-max_batches = 40000
++max_batches = 40000  #define total number of batches for run.
+ 
+ [convolutional]
+ batch_normalize=1
+@@ -245,7 +256,7 @@ classes=20
+ coords=4
+ rescore=1
+ side=7
+-num=3
++num=3 #[Lucas review] the number of prediction bus
+ softmax=0
+ sqrt=1
+ jitter=.2
+diff --git a/examples/yolo.c b/examples/yolo.c
+index 9174b40..a6eceff 100644
+--- a/examples/yolo.c
++++ b/examples/yolo.c
+@@ -4,8 +4,8 @@ char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "c
+ 
+ void train_yolo(char *cfgfile, char *weightfile)
+ {
+-    char *train_images = "/data/voc/train.txt";
+-    char *backup_directory = "/home/pjreddie/backup/";
++    char *train_images = "/home/lucas/Project/git_workspace/yolov1_new/darknet/train.txt";
++    char *backup_directory = "/home/lucas/Project/git_workspace/yolov1_new/darknet/backup/";
+     srand(time(0));
+     char *base = basecfg(cfgfile);
+     printf("%s\n", base);
+@@ -31,6 +31,7 @@ void train_yolo(char *cfgfile, char *weightfile)
+     args.w = net->w;
+     args.h = net->h;
+     args.paths = paths;
++    /*[Lucas review] args.n = d.X.rows = imgs = 16*4 (bxs) = batch size = 64*/
+     args.n = imgs;
+     args.m = plist->size;
+     args.classes = classes;
+@@ -47,7 +48,7 @@ void train_yolo(char *cfgfile, char *weightfile)
+     pthread_t load_thread = load_data_in_thread(args);
+     clock_t time;
+     //while(i*imgs < N*120){
+-    while(get_current_batch(net) < net->max_batches){
++    while(get_current_batch(net) < net->max_batches){ // 1 batch = bactch num * subdivision.
+         i += 1;
+         time=clock();
+         pthread_join(load_thread, 0);
+@@ -295,7 +296,7 @@ void test_yolo(char *cfgfile, char *weightfile, char *filename, float thresh)
+         network_predict(net, X);
+         printf("%s: Predicted in %f seconds.\n", input, sec(clock()-time));
+         get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0);
+-        if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms);
++        if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms); /*eliminate the similar box and only left 1 box*/
+         draw_detections(im, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
+         save_image(im, "predictions");
+         show_image(im, "predictions");
+diff --git a/run_ITRI_tiny_yolov1.sh b/run_ITRI_tiny_yolov1.sh
+new file mode 100644
+index 0000000..9999dd2
+--- /dev/null
++++ b/run_ITRI_tiny_yolov1.sh
+@@ -0,0 +1,10 @@
++#! /bin/sh
++#
++# run_ITRI_tiny_yolov1.sh
++# Copyright (C) 2018 lucas <lucas@lucas>
++#
++# Distributed under terms of the MIT license.
++#
++
++
++./darknet yolo test cfg/yolov1/yolo-tiny_v1.cfg yolo-tiny_v1.weights data/dog.jpg
+diff --git a/run_ITRI_tiny_yolov1_train.sh b/run_ITRI_tiny_yolov1_train.sh
+new file mode 100644
+index 0000000..9305e2c
+--- /dev/null
++++ b/run_ITRI_tiny_yolov1_train.sh
+@@ -0,0 +1,9 @@
++#! /bin/sh
++#
++# run_ITRI_tiny_yolov1.sh
++# Copyright (C) 2018 lucas <lucas@lucas>
++#
++# Distributed under terms of the MIT license.
++#
++
++./darknet yolo train cfg/yolov1/yolo.train.cfg extraction.conv.weights
+diff --git a/run_ITRI_tiny_yolov1_webcam.sh b/run_ITRI_tiny_yolov1_webcam.sh
+new file mode 100644
+index 0000000..2d277e3
+--- /dev/null
++++ b/run_ITRI_tiny_yolov1_webcam.sh
+@@ -0,0 +1,10 @@
++#! /bin/sh
++#
++# run_ITRI_tiny_yolov1.sh
++# Copyright (C) 2018 lucas <lucas@lucas>
++#
++# Distributed under terms of the MIT license.
++#
++
++
++./darknet yolo demo cfg/yolov1/yolo.cfg yolov1.weights
+diff --git a/src/batchnorm_layer.c b/src/batchnorm_layer.c
+index ebff387..0da468e 100644
+--- a/src/batchnorm_layer.c
++++ b/src/batchnorm_layer.c
+@@ -137,14 +137,15 @@ void forward_batchnorm_layer(layer l, network net)
+     if(l.type == BATCHNORM) copy_cpu(l.outputs*l.batch, net.input, 1, l.output, 1);
+     copy_cpu(l.outputs*l.batch, l.output, 1, l.x, 1);
+     if(net.train){
++	/*[Lucas review] follow Batch normalization define to get mean and var.*/
++	/*[Lucas review] YOLO make one mean and var for one output filter, so dim(mean/var) is num_out_filter X 1*/
+         mean_cpu(l.output, l.batch, l.out_c, l.out_h*l.out_w, l.mean);
+         variance_cpu(l.output, l.mean, l.batch, l.out_c, l.out_h*l.out_w, l.variance);
+-
+         scal_cpu(l.out_c, .99, l.rolling_mean, 1);
+         axpy_cpu(l.out_c, .01, l.mean, 1, l.rolling_mean, 1);
+         scal_cpu(l.out_c, .99, l.rolling_variance, 1);
+         axpy_cpu(l.out_c, .01, l.variance, 1, l.rolling_variance, 1);
+-
++	
+         normalize_cpu(l.output, l.mean, l.variance, l.batch, l.out_c, l.out_h*l.out_w);   
+         copy_cpu(l.outputs*l.batch, l.output, 1, l.x_norm, 1);
+     } else {
+@@ -160,9 +161,12 @@ void backward_batchnorm_layer(layer l, network net)
+         l.mean = l.rolling_mean;
+         l.variance = l.rolling_variance;
+     }
++/*[Lucas review] YOLO follows BPNORM paper to design backword walk*/
++/*[Lucas review] dout = delta = class..,confidence score...,xywh...*/
++/*[Lucas review] dbeta = 1 x sigma(i=1,b)sigma(j=0,wxh)dout(i,j), for each filter*/
+     backward_bias(l.bias_updates, l.delta, l.batch, l.out_c, l.out_w*l.out_h);
++/*[Lucas review] dgama = norm(X) *sigma(i=1,b)sigma(j=0,wxh)(norm(X)xdout(i,j)), for each filter. */
+     backward_scale_cpu(l.x_norm, l.delta, l.batch, l.out_c, l.out_w*l.out_h, l.scale_updates);
+-
+     scale_bias(l.delta, l.scales, l.batch, l.out_c, l.out_h*l.out_w);
+ 
+     mean_delta_cpu(l.delta, l.variance, l.batch, l.out_c, l.out_w*l.out_h, l.mean_delta);
+diff --git a/src/blas.c b/src/blas.c
+index d25c196..a981463 100644
+--- a/src/blas.c
++++ b/src/blas.c
+@@ -91,6 +91,7 @@ void shortcut_cpu(int batch, int w1, int h1, int c1, float *add, int w2, int h2,
+     }
+ }
+ 
++
+ void mean_cpu(float *x, int batch, int filters, int spatial, float *mean)
+ {
+     float scale = 1./(batch * spatial);
+diff --git a/src/convolutional_layer.c b/src/convolutional_layer.c
+index f197bcf..228b306 100644
+--- a/src/convolutional_layer.c
++++ b/src/convolutional_layer.c
+@@ -444,9 +444,11 @@ void backward_bias(float *bias_updates, float *delta, int batch, int n, int size
+ void forward_convolutional_layer(convolutional_layer l, network net)
+ {
+     int i, j;
+-
++    /*[Lucas review] clear l.ouput to 0 for samples in the same batch*/
+     fill_cpu(l.outputs*l.batch, 0, l.output, 1);
+ 
++    /*[Lucas review] FIXME: should study it. From paper, binarize weight and input can speed up calculation, details could refer to paper 
++    BinaryConnect: Training Deep Neural Networks with binary weights during propagations */
+     if(l.xnor){
+         binarize_weights(l.weights, l.n, l.c/l.groups*l.size*l.size, l.binary_weights);
+         swap_binary(&l);
+@@ -470,6 +472,7 @@ void forward_convolutional_layer(convolutional_layer l, network net)
+     }
+ 
+     if(l.batch_normalize){
++    /*[Lucas review] FIXME: should study batchnorm.*/
+         forward_batchnorm_layer(l, net);
+     } else {
+         add_bias(l.output, l.biases, l.batch, l.n, l.out_h*l.out_w);
+@@ -486,16 +489,30 @@ void backward_convolutional_layer(convolutional_layer l, network net)
+     int n = l.size*l.size*l.c/l.groups;
+     int k = l.out_w*l.out_h;
+ 
++    /*[Lucas review] backward pass for activation function*/
+     gradient_array(l.output, l.outputs*l.batch, l.activation, l.delta);
+ 
++    /*[Lucas review] backward pass for BP Norm*/
+     if(l.batch_normalize){
+         backward_batchnorm_layer(l, net);
+     } else {
+         backward_bias(l.bias_updates, l.delta, l.batch, l.n, k);
+     }
+-
++	
++ 	/*	[Lucas review]	backward pass in conv layer		 
++	 *	dl/dw = dl/dz x dz/dx
++	 *	dw <----------------
++	 *	w  ----------------->    	<--------dl/dz     
++	 *           			CONV	-------->z 
++	 * 	x  ----------------->
++	 *	dx <-----------------
++	 *	dl/dx = dl/dz x dz/dw
++	 *
++	 *	the condition is that, dl/dz = delta, dz = Weight x img2col(input).
++	 */
+     for(i = 0; i < l.batch; ++i){
+         for(j = 0; j < l.groups; ++j){
++	    /* [Lucas review] cal dl/dw for gradients of the weight */
+             float *a = l.delta + (i*l.groups + j)*m*k;
+             float *b = net.workspace;
+             float *c = l.weight_updates + j*l.nweights/l.groups;
+@@ -504,9 +521,10 @@ void backward_convolutional_layer(convolutional_layer l, network net)
+ 
+             im2col_cpu(im, l.c/l.groups, l.h, l.w, 
+                     l.size, l.stride, l.pad, b);
+-            gemm(0,1,m,n,k,1,a,k,b,k,1,c,n);
++            gemm(0,1,m,n,k,1,a,k,b,k,1,c,n);	
+ 
+             if(net.delta){
++		/*[Lucas review] cal dl/dx and bakward pass it to previous layer */
+                 a = l.weights + j*l.nweights/l.groups;
+                 b = l.delta + (i*l.groups + j)*m*k;
+                 c = net.workspace;
+diff --git a/src/data.c b/src/data.c
+index 935e638..33b47db 100644
+--- a/src/data.c
++++ b/src/data.c
+@@ -203,6 +203,8 @@ void correct_boxes(box_label *boxes, int n, float dx, float dy, float sx, float
+         boxes[i].top =   constrain(0, 1, boxes[i].top);
+         boxes[i].bottom =   constrain(0, 1, boxes[i].bottom);
+ 
++        /*[Lucas review] the unit is per pixcel. you can multiply it with 440 to get the box size corresponding to 440 x 440*/
++
+         boxes[i].x = (boxes[i].left+boxes[i].right)/2;
+         boxes[i].y = (boxes[i].top+boxes[i].bottom)/2;
+         boxes[i].w = (boxes[i].right - boxes[i].left);
+@@ -262,13 +264,18 @@ void fill_truth_region(char *path, float *truth, int classes, int num_boxes, int
+     find_replace(labelpath, ".JPG", ".txt", labelpath);
+     find_replace(labelpath, ".JPEG", ".txt", labelpath);
+     int count = 0;
++    /*[Lucas review] read truth box detection data under darknet/VOCdevkit/VOC2007/labels and the one in 2012*/
+     box_label *boxes = read_boxes(labelpath, &count);
++    /*[Lucas review] don't know why do ramdomize and correct boxes with parameters ?*/
+     randomize_boxes(boxes, count);
+     correct_boxes(boxes, count, dx, dy, sx, sy, flip);
+     float x,y,w,h;
+     int id;
+     int i;
+ 
++    /*[Lucas review] set up truth[]*/
++    /*[Lucas review] truth[] layout: 1 valid bit, 20 class,x,y,w,h  (total = 7*7*1+20+4)*/
++
+     for (i = 0; i < count; ++i) {
+         x =  boxes[i].x;
+         y =  boxes[i].y;
+@@ -280,10 +287,8 @@ void fill_truth_region(char *path, float *truth, int classes, int num_boxes, int
+ 
+         int col = (int)(x*num_boxes);
+         int row = (int)(y*num_boxes);
+-
+         x = x*num_boxes - col;
+         y = y*num_boxes - row;
+-
+         int index = (col+row*num_boxes)*(5+classes);
+         if (truth[index]) continue;
+         truth[index++] = 1;
+@@ -777,16 +782,22 @@ data load_data_region(int n, char **paths, int m, int w, int h, int size, int cl
+     data d = {0};
+     d.shallow = 0;
+ 
++    /* [Lucas review] load_data_region: d.X represents a batch data. e.g. 64 samples*/
+     d.X.rows = n;
+     d.X.vals = calloc(d.X.rows, sizeof(float*));
+     d.X.cols = h*w*3;
+ 
+ 
+     int k = size*size*(5+classes);
++    /* [Lucas review] load_data_region: d.y is truth data*/
++    /* [Lucas review] dim of n represents as the number of samples for batches*/
++    /* [Lucas review] dim of k represents as layout of truth data.*/
++    /* [Lucas review] k's layout is (is_obj(1),class,class,...class(20),x,y,w,h(4)) for 7*7 grids, totoal quantity is 7*7*(1+20+4) */
++
+     d.y = make_matrix(n, k);
++    /*[Lucas review] Load smaples for a batach, which eqauls l.batch*l.subdivision*/
+     for(i = 0; i < n; ++i){
+         image orig = load_image_color(random_paths[i], 0, 0);
+-
+         int oh = orig.h;
+         int ow = orig.w;
+ 
+@@ -805,6 +816,7 @@ data load_data_region(int n, char **paths, int m, int w, int h, int size, int cl
+         float sy = (float)sheight / oh;
+ 
+         int flip = rand()%2;
++	/*[Lucas review] FIXME don't know why do image adjustion ? */
+         image cropped = crop_image(orig, pleft, ptop, swidth, sheight);
+ 
+         float dx = ((float)pleft/ow)/sx;
+@@ -814,7 +826,8 @@ data load_data_region(int n, char **paths, int m, int w, int h, int size, int cl
+         if(flip) flip_image(sized);
+         random_distort_image(sized, hue, saturation, exposure);
+         d.X.vals[i] = sized.data;
+-
++	/*[Lucas review] setup truth data to d.y*/
++        /*[Lucas review] size = 7*/
+         fill_truth_region(random_paths[i], d.y.vals[i], classes, size, flip, dx, dy, 1./sx, 1./sy);
+ 
+         free_image(orig);
+@@ -1018,7 +1031,7 @@ void *load_thread(void *ptr)
+         *a.d = load_data_seg(a.n, a.paths, a.m, a.w, a.h, a.classes, a.min, a.max, a.angle, a.aspect, a.hue, a.saturation, a.exposure, a.scale);
+     } else if (a.type == REGION_DATA){
+         *a.d = load_data_region(a.n, a.paths, a.m, a.w, a.h, a.num_boxes, a.classes, a.jitter, a.hue, a.saturation, a.exposure);
+-    } else if (a.type == DETECTION_DATA){
++    } else if (a.type == DETECTION_DATA){ /*[Lucas review] a.num_boxes = side of grid = 7*/
+         *a.d = load_data_detection(a.n, a.paths, a.m, a.w, a.h, a.num_boxes, a.classes, a.jitter, a.hue, a.saturation, a.exposure);
+     } else if (a.type == SWAG_DATA){
+         *a.d = load_data_swag(a.paths, a.n, a.classes, a.jitter);
+@@ -1377,7 +1390,7 @@ void smooth_data(data d)
+     float scale = 1. / d.y.cols;
+     float eps = .1;
+     for(i = 0; i < d.y.rows; ++i){
+-        for(j = 0; j < d.y.cols; ++j){
++	    for(j = 0; j < d.y.cols; ++j){
+             d.y.vals[i][j] = eps * scale + (1-eps) * d.y.vals[i][j];
+         }
+     }
+diff --git a/src/detection_layer.c b/src/detection_layer.c
+index a2a3c84..3edba6e 100644
+--- a/src/detection_layer.c
++++ b/src/detection_layer.c
+@@ -10,6 +10,9 @@
+ #include <assert.h>
+ #include <string.h>
+ #include <stdlib.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
+ 
+ detection_layer make_detection_layer(int batch, int inputs, int n, int side, int classes, int coords, int rescore)
+ {
+@@ -49,11 +52,15 @@ detection_layer make_detection_layer(int batch, int inputs, int n, int side, int
+ 
+ void forward_detection_layer(const detection_layer l, network net)
+ {
++
+     int locations = l.side*l.side;
+     int i,j;
++    /*[Lucas review] l.output = 7*7*30 = class..class(7*7*20),scale..scale(7*7*2),box..box(7*7*2*4)[x,y,w,h] */
+     memcpy(l.output, net.input, l.outputs*l.batch*sizeof(float));
+     //if(l.reorg) reorg(l.output, l.w*l.h, size*l.n, l.batch, 1);
+     int b;
++
++    /*[Lucas review] do softmax for classes of grids*/
+     if (l.softmax){
+         for(b = 0; b < l.batch; ++b){
+             int index = b*l.inputs;
+@@ -64,6 +71,7 @@ void forward_detection_layer(const detection_layer l, network net)
+             }
+         }
+     }
++    
+     if(net.train){
+         float avg_iou = 0;
+         float avg_cat = 0;
+@@ -76,10 +84,14 @@ void forward_detection_layer(const detection_layer l, network net)
+         memset(l.delta, 0, size * sizeof(float));
+         for (b = 0; b < l.batch; ++b){
+             int index = b*l.inputs;
++	    /* [Lucas review] locations = 7*7 */
+             for (i = 0; i < locations; ++i) {
+                 int truth_index = (b*locations + i)*(1+l.coords+l.classes);
+                 int is_obj = net.truth[truth_index];
++	     /*[Lucas review] l.n = the number of predicted box = 3*/
+                 for (j = 0; j < l.n; ++j) {
++	     /*[Lucas review] p_index = index of confidence score for j'box*/
++	     /*[Lucas review] noobject part's confidence score part in loss function*/	    
+                     int p_index = index + locations*l.classes + i*l.n + j;
+                     l.delta[p_index] = l.noobject_scale*(0 - l.output[p_index]);
+                     *(l.cost) += l.noobject_scale*pow(l.output[p_index], 2);
+@@ -95,6 +107,8 @@ void forward_detection_layer(const detection_layer l, network net)
+                 }
+ 
+                 int class_index = index + i*l.classes;
++	/*[Lucas review] l.delta's layout is the same as 7*7*30*/
++        /*[Lucas review] classification part in loss function.  */
+                 for(j = 0; j < l.classes; ++j) {
+                     l.delta[class_index+j] = l.class_scale * (net.truth[truth_index+1+j] - l.output[class_index+j]);
+                     *(l.cost) += l.class_scale * pow(net.truth[truth_index+1+j] - l.output[class_index+j], 2);
+@@ -103,14 +117,16 @@ void forward_detection_layer(const detection_layer l, network net)
+                 }
+ 
+                 box truth = float_to_box(net.truth + truth_index + 1 + l.classes, 1);
++		/*[Lucas review] only for reduce calculation complexity to some extent.*/
+                 truth.x /= l.side;
+                 truth.y /= l.side;
+ 
++		/*[Lucas review] l.n = 2 =  the number of box*/
+                 for(j = 0; j < l.n; ++j){
+                     int box_index = index + locations*(l.classes + l.n) + (i*l.n + j) * l.coords;
+                     box out = float_to_box(l.output + box_index, 1);
+-                    out.x /= l.side;
+-                    out.y /= l.side;
++                   out.x /= l.side;
++                   out.y /= l.side;
+ 
+                     if (l.sqrt){
+                         out.w = out.w*out.w;
+@@ -157,8 +173,12 @@ void forward_detection_layer(const detection_layer l, network net)
+                 float iou  = box_iou(out, truth);
+ 
+                 //printf("%d,", best_index);
++		/*[Lucas review] get the predicted confidence score for the grid */
+                 int p_index = index + locations*l.classes + i*l.n + best_index;
++		/*[Lucas review] reduct extra added confidence loss of grids back on noobj loss accumulation*/
+                 *(l.cost) -= l.noobject_scale * pow(l.output[p_index], 2);
++		/*[Lucas review] lamda obj part in loss function*/
++		/*[Lucas review] only calculate the loss for best box. as metioned in paper*/
+                 *(l.cost) += l.object_scale * pow(1-l.output[p_index], 2);
+                 avg_obj += l.output[p_index];
+                 l.delta[p_index] = l.object_scale * (1.-l.output[p_index]);
+@@ -167,18 +187,21 @@ void forward_detection_layer(const detection_layer l, network net)
+                     l.delta[p_index] = l.object_scale * (iou - l.output[p_index]);
+                 }
+ 
++		/*[Lucas review] corrdination part in loss function*/
+                 l.delta[box_index+0] = l.coord_scale*(net.truth[tbox_index + 0] - l.output[box_index + 0]);
+                 l.delta[box_index+1] = l.coord_scale*(net.truth[tbox_index + 1] - l.output[box_index + 1]);
+                 l.delta[box_index+2] = l.coord_scale*(net.truth[tbox_index + 2] - l.output[box_index + 2]);
+                 l.delta[box_index+3] = l.coord_scale*(net.truth[tbox_index + 3] - l.output[box_index + 3]);
+                 if(l.sqrt){
++		    /*[Lucas review] when l.sqrt=1, l.ouput[w,h] are trainning as sqrt(w) and sqrt(h), otherwise as w and h.*/
++                    /*[Lucas review] yolov1.cfg follow the loss function paper described, l.sqrt = 1*/
+                     l.delta[box_index+2] = l.coord_scale*(sqrt(net.truth[tbox_index + 2]) - l.output[box_index + 2]);
+                     l.delta[box_index+3] = l.coord_scale*(sqrt(net.truth[tbox_index + 3]) - l.output[box_index + 3]);
+                 }
+-
++		/*[Lucas review] FIXME loss function already compensate the loss of confidence score, why */
+                 *(l.cost) += pow(1-iou, 2);
+-                avg_iou += iou;
+-                ++count;
++                avg_iou += iou; /*used to calculated average iou of represented boxes.*/
++                ++count; /*[Lucas review] counting the quantity of represented boxes for 7x7 grids.*/
+             }
+         }
+ 
+@@ -208,7 +231,7 @@ void forward_detection_layer(const detection_layer l, network net)
+             free(costs);
+         }
+ 
+-
++	/*[Lucas review] FIXME don't know what is this line for ?*/
+         *(l.cost) = pow(mag_array(l.delta, l.outputs * l.batch), 2);
+ 
+ 
+@@ -222,19 +245,50 @@ void backward_detection_layer(const detection_layer l, network net)
+     axpy_cpu(l.batch*l.inputs, 1, l.delta, 1, net.delta, 1);
+ }
+ 
++void save_prediction_files(float *data)
++{
++    int fd;
++    int nr;
++    unsigned int* dump;
++    
++    fd = open("prediction_cube.bin", O_CREAT | O_SYNC | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR);
++    if (fd == -1)
++	       printf("[OBJ DECTOR] save data failed\n");
++
++    printf("[OBJ DECTOR] float = %d bytes\n",sizeof(float));
++    printf("[OBJ DECTOR] prediction size = %d bytes\n", 7*7*30*sizeof(float));
++    nr = write(fd, data,7*7*30*sizeof(float));
++    if (nr == -1)
++	       printf("[OBJ DECTOR] copy error\n");
++
++    dump = data;
++    printf("[OBJ DECTOR] save %d bytes to ./prediction_cube.bin\n", nr);
++    printf("[OBJ DECTOR] dump data for check\n");
++    printf("000000000: %x %x %x %x\n", *dump, *(dump+1), *(dump+2),*(dump+3));
++    printf("000016f0: %x %x\n", *(dump + 1468), *(dump + 1469));
++    return ;
++}
++
++
+ void get_detection_boxes(layer l, int w, int h, float thresh, float **probs, box *boxes, int only_objectness)
+ {
+     int i,j,n;
+     float *predictions = l.output;
+     //int per_cell = 5*num+classes;
++
++    save_prediction_files(predictions);
++
+     for (i = 0; i < l.side*l.side; ++i){
+         int row = i / l.side;
+         int col = i % l.side;
+-        for(n = 0; n < l.n; ++n){
+-            int index = i*l.n + n;
++	for(n = 0; n < l.n; ++n){
++            int index = i*l.n + n; /*class..class(7*7*20),scale..scale(7*7*2),box..box(7*7*2*4)[x,y,w,h] */
+             int p_index = l.side*l.side*l.classes + i*l.n + n;
+             float scale = predictions[p_index];
+             int box_index = l.side*l.side*(l.classes + l.n) + (i*l.n + n)*4;
++
++            /*[Lucas review] x,y is calculated and based on 7*7 grids, so it need to divide to l.side */
++   	    /*[Lucas review] x,y is the offset withine a grid, so prediction[]+col/raw represents the central corrdination completly */
+             boxes[index].x = (predictions[box_index + 0] + col) / l.side * w;
+             boxes[index].y = (predictions[box_index + 1] + row) / l.side * h;
+             boxes[index].w = pow(predictions[box_index + 2], (l.sqrt?2:1)) * w;
+@@ -242,7 +296,7 @@ void get_detection_boxes(layer l, int w, int h, float thresh, float **probs, box
+             for(j = 0; j < l.classes; ++j){
+                 int class_index = i*l.classes;
+                 float prob = scale*predictions[class_index+j];
+-                probs[index][j] = (prob > thresh) ? prob : 0;
++                probs[index][j] = (prob > thresh) ? prob : 0;/* a array carries all prob(class)*confidence for each box. e.g.  [box][class], each element is prob(class)*con */
+             }
+             if(only_objectness){
+                 probs[index][0] = scale;
+diff --git a/src/image.c b/src/image.c
+index ac1b629..975c529 100644
+--- a/src/image.c
++++ b/src/image.c
+@@ -223,7 +223,7 @@ image **load_alphabet()
+ {
+     int i, j;
+     const int nsize = 8;
+-    image **alphabets = calloc(nsize, sizeof(image));
++    image **alphabets = calloc(nsize, sizeof(image *));
+     for(j = 0; j < nsize; ++j){
+         alphabets[j] = calloc(128, sizeof(image));
+         for(i = 32; i < 127; ++i){
+@@ -251,8 +251,9 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
+                     strcat(labelstr, ", ");
+                     strcat(labelstr, names[j]);
+                 }
+-                printf("%s: %.0f%%\n", names[j], probs[i][j]*100);
+-            }
++                printf("%s: %.0f%%(%f)\n", names[j], probs[i][j]*100, probs[i][j]);
++		
++	    }
+         }
+         if(class >= 0){
+             int width = im.h * .006;
+@@ -287,6 +288,11 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
+             if(right > im.w-1) right = im.w-1;
+             if(top < 0) top = 0;
+             if(bot > im.h-1) bot = im.h-1;
++	     printf("[OBJ DECTOR] class=%s, x=%f,y=%f,w=%f,h=%f, im.w=%d, im.h=%d\n",
++		labelstr,
++		b.x, b.y, b.w, b.h, im.w, im.h);
++
++	     printf("[OBJ DECTOR] bgr = (%f, %f, %f)\n", rgb[2], rgb[1], rgb[0]);
+ 
+             draw_box_width(im, left, top, right, bot, width, red, green, blue);
+             if (alphabet) {
+diff --git a/src/matrix.c b/src/matrix.c
+index 799916b..86c7be0 100644
+--- a/src/matrix.c
++++ b/src/matrix.c
+@@ -91,7 +91,7 @@ matrix copy_matrix(matrix m)
+ matrix make_matrix(int rows, int cols)
+ {
+     int i;
+-    matrix m;
++    matrix m; /*FIXME operate stack data out of the scope*/
+     m.rows = rows;
+     m.cols = cols;
+     m.vals = calloc(m.rows, sizeof(float *));
+diff --git a/src/network.c b/src/network.c
+index 1b4df6b..7108dd2 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -194,6 +194,7 @@ void forward_network(network *netp)
+     for(i = 0; i < net.n; ++i){
+         net.index = i;
+         layer l = net.layers[i];
++        /*[Lucas review] clear l.delta*/
+         if(l.delta){
+             fill_cpu(l.outputs * l.batch, 0, l.delta, 1);
+         }
+@@ -274,10 +275,12 @@ void backward_network(network *netp)
+             net = orig;
+         }else{
+             layer prev = net.layers[i-1];
++	    /*Lucas review net.input/delta is for layer-1.*/
+             net.input = prev.output;
+             net.delta = prev.delta;
+         }
+         net.index = i;
++	/*[Lucas] do backward walk and save delta to prev.delta*/
+         l.backward(l, net);
+     }
+ }
+@@ -315,8 +318,12 @@ float train_network(network *net, data d)
+ 
+     int i;
+     float sum = 0;
++    /*[Lucas review] n = 4, by subdivision*/
+     for(i = 0; i < n; ++i){
++	/*[Lucas review] copy d.x and d.y to net->input and net->truth accordingly*/
+         get_next_batch(d, batch, i*batch, net->input, net->truth);
++	/*[Lucas review] net->input layout row0 = sample 0 (h*w*3), row1 = sample 1... row15 = sample15 */
++	/*[Lucas review] net->truth layout ground data 0, ground data1,...ground data 15 */
+         float err = train_network_datum(net);
+         sum += err;
+     }
+diff --git a/src/parser.c b/src/parser.c
+index da7487b..3867a1d 100644
+--- a/src/parser.c
++++ b/src/parser.c
+@@ -168,6 +168,7 @@ layer parse_deconvolutional(list *options, size_params params)
+ 
+ convolutional_layer parse_convolutional(list *options, size_params params)
+ {
++    /*[Lucas review] l.n = the number of ouput filters*/
+     int n = option_find_int(options, "filters",1);
+     int size = option_find_int(options, "size",1);
+     int stride = option_find_int(options, "stride",1);
+@@ -554,6 +555,7 @@ void parse_net_options(list *options, network *net)
+     int subdivs = option_find_int(options, "subdivisions",1);
+     net->time_steps = option_find_int_quiet(options, "time_steps",1);
+     net->notruth = option_find_int_quiet(options, "notruth",0);
++    /*[Lucas review] batch = batch / subdivision*/
+     net->batch /= subdivs;
+     net->batch *= net->time_steps;
+     net->subdivisions = subdivs;
+@@ -644,6 +646,7 @@ network *parse_network_cfg(char *filename)
+     list *options = s->options;
+     if(!is_network(s)) error("First section must be [net] or [network]");
+     parse_net_options(options, net);
++    
+ 
+     params.h = net->h;
+     params.w = net->w;
+diff --git a/tracing.sh b/tracing.sh
+new file mode 100644
+index 0000000..076b0cc
+--- /dev/null
++++ b/tracing.sh
+@@ -0,0 +1,12 @@
++#! /bin/sh
++#
++# cscope.sh
++# Copyright (C) 2018 lucas <lucas@lucas>
++#
++# Distributed under terms of the MIT license.
++#
++
++
++find ./   -name "*.cpp" -o -name "*.c" -o -name "*.h" -o -name "*.cpp" > cscope.files
++cscope -Rbqk
++ctags -R
