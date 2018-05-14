@@ -7,6 +7,7 @@
 #include "gemm.h"
 #include <stdio.h>
 #include <time.h>
+#include "darknet.h"
 
 #ifdef AI2
 #include "xnor_layer.h"
@@ -441,6 +442,30 @@ void backward_bias(float *bias_updates, float *delta, int batch, int n, int size
     }
 }
 
+quant_t* covert_float2quan(float *weights, unsigned int size)
+{
+    unsigned int i;
+
+     printf("[OBJ DECTECTOR] convert to short x %d\n",size);
+    quant_t *p = calloc(size,sizeof(quant_t));
+    for(i = 0 ; i < size; i++);
+	p[i] = (quant_t) weights[i];
+    return p;
+}
+
+quant_t* covert_quan2float(quant_t *weights, unsigned int size)
+{
+    unsigned int i;
+    float *p = calloc(size,sizeof(float));
+    printf("[OBJ DECTECTOR] convert to float x %d\n",size);
+
+    for(i = 0 ; i < size; i++);
+        p[i] = weights[i];
+    return p;
+}
+
+
+
 void forward_convolutional_layer(convolutional_layer l, network net)
 {
     int i, j;
@@ -459,25 +484,52 @@ void forward_convolutional_layer(convolutional_layer l, network net)
     int m = l.n/l.groups;
     int k = l.size*l.size*l.c/l.groups;
     int n = l.out_w*l.out_h;
+
+#ifdef QUANTIZITION
+    quant_t *q_weights = covert_float2quan(l.weights, m * k);    
+    quant_t *q_output = calloc(m*n*l.batch,sizeof(quant_t));
+#endif
     for(i = 0; i < l.batch; ++i){
         for(j = 0; j < l.groups; ++j){
+#ifdef QUANTIZITION
+            quant_t *a = q_weights + j*l.nweights/l.groups;
+            quant_t *b = net.workspace;
+	    quant_t *c = q_output + (i*l.groups + j)*n*m;	    
+#else
             float *a = l.weights + j*l.nweights/l.groups;
-            float *b = net.workspace;
+            float *b =  net.workspace;	
             float *c = l.output + (i*l.groups + j)*n*m;
+#endif
 
-            im2col_cpu(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
+#ifdef QUANTIZITION
+           im2col_cpu_quant(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
                 l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+
+            gemm_quantize(0,0,m,n,k,1,a,k,b,n,1,c,n);
+
+#else
+           im2col_cpu(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
+                l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
+
             gemm(0,0,m,n,k,1,a,k,b,n,1,c,n);
+#endif
         }
     }
 
+
+#ifdef QUANTIZITION
+    free(l.output);
+    l.output = covert_quan2float(q_output,m*n);
+    free(l.weights);
+    l.weights = covert_quan2float(q_weights,m*k);
+#endif    
     if(l.batch_normalize){
     /*[Lucas review] FIXME: should study batchnorm.*/
         forward_batchnorm_layer(l, net);
     } else {
         add_bias(l.output, l.biases, l.batch, l.n, l.out_h*l.out_w);
     }
-
+  
     activate_array(l.output, l.outputs*l.batch, l.activation);
     if(l.binary || l.xnor) swap_binary(&l);
 }

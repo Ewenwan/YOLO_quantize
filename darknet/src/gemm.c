@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <math.h>
 
+
 void gemm_bin(int M, int N, int K, float ALPHA, 
         char  *A, int lda, 
         float *B, int ldb,
@@ -60,6 +61,42 @@ void time_random_matrix(int TA, int TB, int m, int k, int n)
     free(b);
     free(c);
 }
+
+void gemm_nn_quantize(int M, int N, int K, quant_t ALPHA, 
+        quant_t *A, int lda, 
+        quant_t *B, int ldb,
+        quant_t *C, int ldc)
+{
+    int i,j,k;
+    #pragma omp parallel for
+    for(i = 0; i < M; ++i){
+        for(k = 0; k < K; ++k){
+            register quant_t A_PART = ALPHA*A[i*lda+k];
+            for(j = 0; j < N; ++j){
+                C[i*ldc+j] += A_PART*B[k*ldb+j];
+            }
+        }
+    }
+}
+
+
+void gemm_quantize(int TA, int TB, int M, int N, int K, quant_t ALPHA,
+        quant_t *A, int lda,
+        quant_t *B, int ldb,
+        quant_t BETA,
+        quant_t *C, int ldc)
+{
+    int i, j;
+    for(i = 0; i < M; ++i){
+        for(j = 0; j < N; ++j){
+            C[i*ldc + j] *= BETA;
+        }
+    }   
+
+    gemm_nn_quantize( M, N, K, ALPHA,A,lda, B, ldb,C,ldc);
+}
+
+
 
 
 void gemm(int TA, int TB, int M, int N, int K, float ALPHA, 

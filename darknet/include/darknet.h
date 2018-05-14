@@ -723,6 +723,8 @@ void do_nms_obj(box *boxes, float **probs, int total, int classes, float thresh)
 
 matrix make_matrix(int rows, int cols);
 
+
+
 #ifndef __cplusplus
 #ifdef OPENCV
 image get_image_from_stream(CvCapture *cap);
@@ -764,5 +766,13 @@ void normalize_array(float *a, int n);
 int *read_intlist(char *s, int *n, int d);
 size_t rand_size_t();
 float rand_normal();
+
+#define QUANTIZITION 1
+
+#ifdef QUANTIZITION
+typedef short quant_t;
+#else
+typedef float quant_t;
+#endif
 
 #endif
