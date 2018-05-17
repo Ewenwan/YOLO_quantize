@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <time.h>
 #include "darknet.h"
+#include "gemm_x86.h"
 
 #ifdef AI2
 #include "xnor_layer.h"
@@ -497,7 +498,8 @@ void forward_convolutional_layer(convolutional_layer l, network net)
             im2col_cpu_quant(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
                 l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
 
-            gemm_quantize(0,0,m,n,k,1,a,k,b,n,1,c,n);
+//            gemm_quantize(0,0,m,n,k,1,a,k,b,n,1,c,n);
+	    eigen_gemm(a, m, k,b,k,n,c);
 #else
             float *a = l.weights + j*l.nweights/l.groups;
             float *b = net.workspace;	
