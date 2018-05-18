@@ -767,7 +767,6 @@ int *read_intlist(char *s, int *n, int d);
 size_t rand_size_t();
 float rand_normal();
 
-#define QUANTIZITION 1
 
 #ifdef QUANTIZITION
 typedef short quant_t;

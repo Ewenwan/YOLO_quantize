@@ -278,7 +278,7 @@ void get_detection_boxes(layer l, int w, int h, float thresh, float **probs, box
     float *predictions = l.output;
     //int per_cell = 5*num+classes;
 
-    save_prediction_files(predictions);
+//    save_prediction_files(predictions);
 
     for (i = 0; i < l.side*l.side; ++i){
         int row = i / l.side;

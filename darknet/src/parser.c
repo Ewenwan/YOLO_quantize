@@ -31,6 +31,8 @@
 #include "softmax_layer.h"
 #include "lstm_layer.h"
 #include "utils.h"
+#include "vec_gemm.h"
+
 
 typedef struct{
     char *type;
@@ -767,6 +769,8 @@ network *parse_network_cfg(char *filename)
         net->workspace = calloc(1, workspace_size);
 #endif
     }
+
+    eigen_vectorize_status();
     return net;
 }
 

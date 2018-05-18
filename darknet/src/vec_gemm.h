@@ -14,6 +14,7 @@ extern "C" {
 void eigen_gemm(float *a, unsigned int ar, unsigned int ac,
 		float *b, unsigned int br, unsigned int bc, float *c);
 
+void eigen_vectorize_status(void);
 #ifdef __cplusplus
 }
 #endif

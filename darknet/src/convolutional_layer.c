@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <time.h>
 #include "darknet.h"
-#include "gemm_x86.h"
+#include "vec_gemm.h"
 
 #ifdef AI2
 #include "xnor_layer.h"
@@ -484,38 +484,44 @@ void forward_convolutional_layer(convolutional_layer l, network net)
     int k = l.size*l.size*l.c/l.groups;
     int n = l.out_w*l.out_h;
 
-#ifdef QUANTIZITION
+#ifdef QUANTIZATION
     quant_t *q_weights = covert_float2quan(l.weights, m * k);    
     quant_t *q_output = calloc(m*n*l.batch,sizeof(quant_t));
 #endif
     for(i = 0; i < l.batch; ++i){
         for(j = 0; j < l.groups; ++j){
-#ifdef QUANTIZITION
+#ifdef QUANTIZATION
             quant_t *a = q_weights + j*l.nweights/l.groups;
             quant_t *b = net.workspace;
 	    quant_t *c = q_output + (i*l.groups + j)*n*m;	    
 
             im2col_cpu_quant(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
                 l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
-
-//            gemm_quantize(0,0,m,n,k,1,a,k,b,n,1,c,n);
+#ifdef EIGEN
 	    eigen_gemm(a, m, k,b,k,n,c);
 #else
+	    gemm_quantize(0,0,m,n,k,1,a,k,b,n,1,c,n);
+#endif
+
+#else  //QUANTIZATION
             float *a = l.weights + j*l.nweights/l.groups;
             float *b = net.workspace;	
             float *c = l.output + (i*l.groups + j)*n*m;
 
             im2col_cpu(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
                 l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
-
+#ifdef EIGEN
+	    eigen_gemm(a, m, k,b,k,n,c);
+#else
             gemm(0,0,m,n,k,1,a,k,b,n,1,c,n);
+#endif
 #endif
 
         }
     }
 
 
-#ifdef QUANTIZITION
+#ifdef QUANTIZATION
     float *t = covert_quan2float(q_output,m*n*l.batch); 
     memcpy(l.output, t, m*n*l.batch*sizeof(float));
     free(t);
