@@ -769,8 +769,9 @@ network *parse_network_cfg(char *filename)
         net->workspace = calloc(1, workspace_size);
 #endif
     }
-
+#ifdef EIGEN
     eigen_vectorize_status();
+#endif
     return net;
 }
 

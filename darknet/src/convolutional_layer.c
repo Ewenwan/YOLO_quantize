@@ -464,6 +464,65 @@ float* covert_quan2float(quant_t *weights, unsigned int size)
 }
 
 
+struct t_arg{
+	float *a;
+	float *b;
+	float *c;
+	unsigned int ar;
+	unsigned int ac;
+	unsigned int br;
+	unsigned int bc;
+};
+
+void *thread_gemm(struct t_arg *arg)
+{
+	eigen_gemm(arg->a, arg->ar, arg->ac,arg->b,arg->br,arg->bc,arg->c);
+	return NULL;	
+}
+
+void multi_gemm(int thread_num, float *a, unsigned int ar, unsigned int ac,
+                float *b, unsigned int br, unsigned int bc, float *c)
+{
+	int i;
+	unsigned int workload;
+	unsigned int left;
+
+	struct t_arg *arg = calloc(thread_num, sizeof(struct t_arg));
+	pthread_t *threads = calloc(thread_num, sizeof(pthread_t));
+
+	workload = ar/thread_num;
+	if(ar % thread_num)
+	{
+		error("[EIGEN] workload unbalance\n");
+	}
+
+
+	for(i=0; i < thread_num; i++ )
+	{
+		int ret;
+		arg[i].a = a + i*workload*ac;
+		arg[i].b = b;
+		arg[i].c = c + i*workload*bc;
+		arg[i].ar = workload;
+		arg[i].ac = ac;
+		arg[i].br = br;
+		arg[i].bc = bc;
+		if(i==0)
+			continue;
+		ret = pthread_create(&threads[i], 0, thread_gemm, &arg[i]);
+		if(ret)
+			error("[EIGEN] Thread creation failed");
+	}
+	thread_gemm(&arg[0]);
+	for(i = 1; i < thread_num; i++){
+        	pthread_join(threads[i], 0);
+	}
+	free(arg);
+	free(threads);
+	return;	
+	
+}
+
 
 void forward_convolutional_layer(convolutional_layer l, network net)
 {
@@ -511,7 +570,13 @@ void forward_convolutional_layer(convolutional_layer l, network net)
             im2col_cpu(net.input + (i*l.groups + j)*l.c/l.groups*l.h*l.w,
                 l.c/l.groups, l.h, l.w, l.size, l.stride, l.pad, b);
 #ifdef EIGEN
+	#ifdef THREADED_EIGEN
+            multi_gemm(4,a, m, k,b,k,n,c);
+	#else
 	    eigen_gemm(a, m, k,b,k,n,c);
+	#endif
+
+
 #else
             gemm(0,0,m,n,k,1,a,k,b,n,1,c,n);
 #endif

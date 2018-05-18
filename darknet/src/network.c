@@ -181,6 +181,37 @@ network *make_network(int n)
     return net;
 }
 
+#ifdef PROFILING
+static char *layer_names[] =
+{
+    "CONV",
+    "DECONV",
+    "CONNECTED",
+    "MAXPOOL",
+    "SOFTMAX",
+    "DETECT",
+    "DROPOUT",
+    "CROP",
+    "ROUTE",
+    "COST",
+    "NORMALIZATION",
+    "AVGPOOL",
+    "LOCAL",
+    "SHORTCUT",
+    "ACTIVE",
+    "RNN",
+    "GRU",
+    "LSTM",
+    "CRNN",
+    "BATCHNORM",
+    "NETWORK",
+    "XNOR",
+    "REGION",
+    "REORG",
+    "BLANK"
+};
+#endif
+
 void forward_network(network *netp)
 {
 #ifdef GPU
@@ -198,7 +229,14 @@ void forward_network(network *netp)
         if(l.delta){
             fill_cpu(l.outputs * l.batch, 0, l.delta, 1);
         }
+	#ifdef PROFILING
+	clock_t t;
+	t=clock();
+	#endif	
         l.forward(l, net);
+	#ifdef PROFILING
+	printf("[PROF] %s takes %fs\n",layer_names[l.type], sec(clock()-t));
+	#endif
         net.input = l.output;
         if(l.truth) {
             net.truth = l.output;

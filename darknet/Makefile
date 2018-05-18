@@ -5,7 +5,10 @@ OPENMP=0
 DEBUG=0
 EIGEN=1
 QUANTIZE=0
-
+PROF=1
+ARCH_X86=1
+ARCH_ARM=0
+THREADED_EIGEN=0
 ARCH= -gencode arch=compute_30,code=sm_30 \
       -gencode arch=compute_35,code=sm_35 \
       -gencode arch=compute_50,code=[sm_50,compute_50] \
@@ -21,16 +24,30 @@ ALIB=libdarknet.a
 EXEC=darknet
 OBJDIR=./obj/
 
-#CC=/home/lucas/Project/ZCU102/source/bsp/petalinux_2017-4/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc
-CC=gcc
 NVCC=nvcc 
 AR=ar
 ARFLAGS=rcs
 OPTS=-Ofast
-#LDFLAGS= -L/home/lucas/Project/ZCU102/source/bsp/petalinux_2017-4/tools/linux-i386/aarch64-linux-gnu/aarch64-linux-gnu/libc/usr/lib/ -lm -pthread 
-LDFLAGS= -lm -pthread
 COMMON= -Iinclude/ -Isrc/ -Iplugin/
 CFLAGS=-Wall -Wno-unknown-pragmas -Wfatal-errors -fPIC
+
+ifeq ($(ARCH_X86),1)
+CC=gcc
+CCP=g++
+LDFLAGS= -lm -pthread
+endif
+
+ifeq ($(ARCH_ARM),1)
+CC=/home/lucas/Project/ZCU102/source/bsp/petalinux_2017-4/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc
+CCP=/home/lucas/Project/ZCU102/source/bsp/petalinux_2017-4/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-g++
+LDFLAGS= -L/home/lucas/Project/ZCU102/source/bsp/petalinux_2017-4/tools/linux-i386/aarch64-linux-gnu/aarch64-linux-gnu/libc/usr/lib/ -lm -pthread
+endif
+
+
+
+ifeq ($(PROF),1)
+CFLAGS+= -DPROFILING
+endif
 
 ifeq ($(OPENMP), 1) 
 CFLAGS+= -fopenmp
@@ -73,6 +90,9 @@ ifeq ($(EIGEN), 1)
 LDFLAGS+= -lstdc++
 OBJ+=vec_gemm.o
 CFLAGS+= -DEIGEN
+ifeq ($(THREADED_EIGEN),1)
+CFLAGS+= -DTHREADED_EIGEN
+endif
 endif
 
 ifeq ($(QUANTIZE),1) 
@@ -104,7 +124,7 @@ $(OBJDIR)%.o: %.cu $(DEPS)
 	$(NVCC) $(ARCH) $(COMMON) --compiler-options "$(CFLAGS)" -c $< -o $@
 
 $(OBJDIR)%.o: %.cpp $(DEPS)
-	g++ $(COMMON) $(CFLAGS) -c $< -o $@
+	$(CCP) $(COMMON) $(CFLAGS) -c $< -o $@
 
 obj:
 	mkdir -p obj
