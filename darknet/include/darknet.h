@@ -413,6 +413,15 @@ typedef enum {
     CONSTANT, STEP, EXP, POLY, STEPS, SIG, RANDOM
 } learning_rate_policy;
 
+
+typedef struct {
+    int w;
+    int h;
+    int c;
+    float *data;
+    char name[256];
+} image;
+
 typedef struct network{
     int n;
     int batch;
@@ -470,6 +479,7 @@ typedef struct network{
     int train;
     int index;
     float *cost;
+    image cur_im;
 
 #ifdef GPU
     float *input_gpu;
@@ -490,12 +500,6 @@ typedef struct {
     float aspect;
 } augment_args;
 
-typedef struct {
-    int w;
-    int h;
-    int c;
-    float *data;
-} image;
 
 typedef struct{
     float x, y, w, h;
