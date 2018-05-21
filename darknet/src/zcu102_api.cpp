@@ -149,6 +149,10 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh)
     void *rgb24_data;
     void *resiz_data;
 	clock_t time;
+	clock_t overall;
+
+	overall = clock();
+
 	layer l = net->layers[net->n-1];
     float nms=.4;
     box *boxes = calloc(l.side*l.side*l.n, sizeof(box));
@@ -207,15 +211,10 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh)
 	unscale_input.c = 3 ;
 	unscale_input.data = image_normalization(RGB24_Mat.ptr(), unscale_input.w, unscale_input.h, unscale_input.c);
 
-
 	draw_detections(unscale_input, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
 	save_image(unscale_input, "predictions");
-	show_image(unscale_input, "predictions");
+	printf("overall time in %f seconds.\n", sec(clock()-overall));
 
-#ifdef OPENCV
-        cvWaitKey(0);
-        cvDestroyAllWindows();
-#endif
 	free_image(input);
 
 }
