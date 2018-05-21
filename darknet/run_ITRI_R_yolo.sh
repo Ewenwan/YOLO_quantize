@@ -7,4 +7,4 @@
 #
 
 
-./darknet yolo test cfg/yolov1/R-tiny_v1.cfg R-tiny_v1.weights data/dog.jpg
+./darknet yolo test resource/R-tiny_v1.cfg resource/R-tiny_v1.weights data/dog.jpg
