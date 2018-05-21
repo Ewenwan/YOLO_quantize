@@ -473,7 +473,7 @@ struct t_arg{
 	unsigned int br;
 	unsigned int bc;
 };
-
+#ifdef THREADED_EIGEN
 void *thread_gemm(struct t_arg *arg)
 {
 	eigen_gemm(arg->a, arg->ar, arg->ac,arg->b,arg->br,arg->bc,arg->c);
@@ -522,7 +522,7 @@ void multi_gemm(int thread_num, float *a, unsigned int ar, unsigned int ac,
 	return;	
 	
 }
-
+#endif
 
 void forward_convolutional_layer(convolutional_layer l, network net)
 {
