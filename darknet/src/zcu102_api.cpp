@@ -13,6 +13,8 @@ static image **alphabet;
 static const char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
 
 
+static void rgb2yuv422(image *src, void *fb);
+
 static network *net;
 void setup_yolo_env(char *cfgfile, char *weightfile)
 {
@@ -102,6 +104,7 @@ void validate_zcu102(int argc, char **argv)
 	char *file = argv[2];
 	long f_size;	
 	void *yuv422_data;
+	void *framebuffer;
 	size_t ret;
 
     if(argc < 6){
@@ -136,13 +139,27 @@ void validate_zcu102(int argc, char **argv)
     fclose(fp);
 
     setup_yolo_env(argv[4], argv[5]);
+
+	framebuffer = malloc(f_size);
+
 //	setup_yolo_env("resource/R-tiny_v1.cfg", "resource/R-tiny_v1.weights");
-    yolo_inference_with_ptr(yuv422_data, width, height, 2, 0.2);
+    yolo_inference_with_ptr(yuv422_data, width, height, 2, 0.2, framebuffer);
 
 }
 
+static image_denormalize(image *im)
+{
+	int i = 0;
+	void *v;
+	char *p;
 
-int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh)
+	p = (void *)im->data;
+	for(i = 0 ; i < im->h * im->w * im->c ; i++)
+		p[i] = (char)im->data[i] * 255;
+}
+
+
+int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *fb)
 {
 
     void *yuv422_data;
@@ -172,8 +189,8 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh)
 	resize(RGB24_Mat, Resize_Mat, Size(net->h, net->w));
 
 	printf("%d,%d,%d\n", net->h, net->w, net->c);
-
-#if DEBUG
+	
+#ifdef DEBUG
 	write_raw_image(yuv422_data,"yuv422_640480_car_conv.raw",w*h*2 );
 	write_raw_image(rgb24_data,"rgb24_640480_car_conv.raw",w*h*3 );
 	write_raw_image(resiz_data,"rgb24_448x448_car_conv.raw", net->h*net->w*net->c );
@@ -190,20 +207,9 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh)
 	cvtColor(Resize_Mat, Resize_Mat, COLOR_RGB2BGR);
 	write_jpeg(Resize_Mat, "rgb24_448x448_car_conv.jpg");
 #endif
-
-
-
-	image input;
-	input.w = net->w;
-	input.h = net->h;
-	input.c = net->c;
-	input.data = image_normalization(Resize_Mat.ptr(), input.w, input.h, input.c);
-	time=clock();
-	network_predict(net, input.data);
-	printf("Predicted in %f seconds.\n", sec(clock()-time));
-
-	get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0); 
-	if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms); /*eliminate the similar box and only left 1 box*/
+	/*FIXME why new need to check*/
+	IplImage *img = new IplImage(Resize_Mat);
+	image resized = ipl_to_image(img);
 
 	image unscale_input;
 	unscale_input.w = w ; 
@@ -211,12 +217,106 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh)
 	unscale_input.c = 3 ;
 	unscale_input.data = image_normalization(RGB24_Mat.ptr(), unscale_input.w, unscale_input.h, unscale_input.c);
 
-	draw_detections(unscale_input, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
-	save_image(unscale_input, "predictions");
-	printf("overall time in %f seconds.\n", sec(clock()-overall));
+	time=clock();
+	network_predict(net, resized.data);
+	printf("%d,%d,%d\n", net->w, net->h, net->c);
+	printf("Predicted in %f seconds.\n", sec(clock()-time));
 
-	free_image(input);
+	get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0); 
+	if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms); /*eliminate the similar box and only left 1 box*/
+
+	draw_detections(unscale_input, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
+
+	printf("exclude darwing fb time in %f seconds.\n", sec(clock()-overall));
+
+	image_denormalize(&unscale_input);
+	rgb2yuv422(&unscale_input, fb);
+
+	printf("overall time in %f seconds.\n", sec(clock()-overall));
+	
+	write_raw_image(fb,"fb_yuyv422_640480_car.raw",w*h*2 );
+	write_raw_image(unscale_input.data ,"bonding_rgb_640480_car.raw",w*h*3);
+
+
+	save_image(unscale_input, "predictions");
+	show_image(unscale_input, "predictions");
+#ifdef OPENCV
+        cvWaitKey(0);
+        cvDestroyAllWindows();
+#endif
+
+	free_image(unscale_input);
+	free_image(resized);
 
 }
 
 
+static void rgb2yuv422(image *src, void *fb)
+{
+	int i,j,n_row,n_col;
+	int R, G, B;
+	int Y, U, V;
+	int RGBIndex, YIndex, UVIndex;
+	int src_width,src_height,input_size;
+
+	src_width = src->w;
+	src_height = src->h;
+
+
+	input_size = src_width * src_height;
+
+	unsigned char *RGBBuffer = (void *)src->data;
+	unsigned char *yuyvBuffer;
+	unsigned char *YBuffer = new unsigned char[input_size];
+	unsigned char *UBuffer = new unsigned char[input_size/2];
+	unsigned char *VBuffer = new unsigned char[input_size/2];
+	unsigned char *ULine = (new unsigned char[src_width+2])+1;
+	unsigned char *VLine = (new unsigned char[src_width+2])+1;
+
+	ULine[-1]=ULine[512]=128;
+	VLine[-1]=VLine[512]=128;
+
+	for (i=0; i<src_height; i++)
+	{
+		RGBIndex = 3*src_width*i;
+		YIndex    = src_width*i;
+		UVIndex   = src_width*i/2;
+
+		for ( j=0; j<src_width; j++)
+		{
+			R = RGBBuffer[RGBIndex++];
+			G = RGBBuffer[RGBIndex++];
+			B = RGBBuffer[RGBIndex++];
+			//Convert RGB to YUV
+			Y = (unsigned char)( ( 66 * R + 129 * G +   25 * B + 128) >> 8) + 16   ;
+			U = (unsigned char)( ( -38 * R -   74 * G + 112 * B + 128) >> 8) + 128 ;
+			V = (unsigned char)( ( 112 * R -   94 * G -   18 * B + 128) >> 8) + 128 ;
+			YBuffer[YIndex++] = static_cast<unsigned char>( (Y<0) ? 0 : ((Y>255) ? 255 : Y) );
+			VLine[j] = V;
+			ULine[j] = U;
+		}
+		for ( j=0; j<src_width; j+=2)
+		{
+			//Filter line
+			V = ((VLine[j-1]+2*VLine[j]+VLine[j+1]+2)>>2);
+			U = ((ULine[j-1]+2*ULine[j]+ULine[j+1]+2)>>2);
+
+			//Clip and copy UV to output buffer
+			VBuffer[UVIndex] = static_cast<unsigned char>( (V<0) ? 0 : ((V>255) ? 255 : V) );
+			UBuffer[UVIndex++] = static_cast<unsigned char>( (U<0) ? 0 : ((U>255) ? 255 : U) );
+		}
+	}
+	YIndex = 0;
+	unsigned char *p = fb;
+	YIndex = UVIndex = 0;	
+
+	for(j=0; j < input_size; j += 2)
+	{
+		p[j] = YBuffer[YIndex++];
+		p[j+1] = UBuffer[UVIndex];
+        p[j+2] = YBuffer[YIndex++];
+        p[j+3] = VBuffer[UVIndex++];
+	}
+
+	return;
+}

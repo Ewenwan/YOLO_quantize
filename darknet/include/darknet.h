@@ -563,6 +563,7 @@ typedef struct{
     float left, right, top, bottom;
 } box_label;
 #ifdef __cplusplus
+#include <opencv2/opencv.hpp>
 extern "C" {
 #endif
 
@@ -579,6 +580,7 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
 void save_image(image p, const char *name);
 void free_image(image m);
 void show_image(image p, const char *name);
+image ipl_to_image(IplImage* src);
 #ifdef __cplusplus
 }
 #endif
