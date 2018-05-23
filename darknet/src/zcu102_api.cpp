@@ -232,6 +232,7 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	printf("overall time in %f seconds.\n", sec(clock()-overall));
 
 	write_raw_image(original_image.data ,"bonding_rgb_640480_car.raw",w*h*3);	
+	write_raw_image(fb,"fb_yuyv422_640480_car.raw",w*h*2 );
 
 #ifdef DEBUG
 	/*image should be plannar and normalized*/
