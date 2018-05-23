@@ -413,6 +413,10 @@ typedef enum {
     CONSTANT, STEP, EXP, POLY, STEPS, SIG, RANDOM
 } learning_rate_policy;
 
+typedef enum {
+	PLANAR,
+	INTERLEAVED
+}channel_type;
 
 typedef struct {
     int w;
@@ -420,6 +424,7 @@ typedef struct {
     int c;
     float *data;
     char name[256];
+	channel_type c_type;
 } image;
 
 typedef struct network{
@@ -581,6 +586,9 @@ void save_image(image p, const char *name);
 void free_image(image m);
 void show_image(image p, const char *name);
 image ipl_to_image(IplImage* src);
+void draw_label_inter(image a, int r, int c, image label, const float *rgb);
+void draw_box_inter(image a, int x1, int y1, int x2, int y2, float r, float g, float b);
+
 #ifdef __cplusplus
 }
 #endif

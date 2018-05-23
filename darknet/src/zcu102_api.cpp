@@ -39,15 +39,9 @@ static float *image_normalization(void *p, int w, int h, int c)
 	char *char_data = p;
 
 	float *data = malloc(sizeof(float)*w*h*c);
-	for(k = 0; k < c; ++k){
-		for(j = 0; j < h; ++j){
-			for(i = 0; i < w; ++i){
-                int dst_index = i + w*j + w*h*k;
-                int src_index = k + c*i + c*w*j;
-                data[dst_index] = (float)char_data[src_index]/255.;
-            }    
-        }    
-    }
+	for(k = 0; k < c*h*w; ++k){
+                data[k] = (float)char_data[k]/255.;
+    }    
 
 	return data;
 }
@@ -142,7 +136,6 @@ void validate_zcu102(int argc, char **argv)
 
 	framebuffer = malloc(f_size);
 
-//	setup_yolo_env("resource/R-tiny_v1.cfg", "resource/R-tiny_v1.weights");
     yolo_inference_with_ptr(yuv422_data, width, height, 2, 0.2, framebuffer);
 
 }
@@ -155,7 +148,7 @@ static image_denormalize(image *im)
 
 	p = (void *)im->data;
 	for(i = 0 ; i < im->h * im->w * im->c ; i++)
-		p[i] = (char)im->data[i] * 255;
+		p[i] = (char)(im->data[i] * 255);
 }
 
 
@@ -207,15 +200,19 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	cvtColor(Resize_Mat, Resize_Mat, COLOR_RGB2BGR);
 	write_jpeg(Resize_Mat, "rgb24_448x448_car_conv.jpg");
 #endif
-	/*FIXME why new need to check*/
+	/*FIXME why new need to check
+	* Make resized to be planar in order to go through the network.
+	*/
 	IplImage *img = new IplImage(Resize_Mat);
 	image resized = ipl_to_image(img);
 
-	image unscale_input;
-	unscale_input.w = w ; 
-	unscale_input.h = h ;
-	unscale_input.c = 3 ;
-	unscale_input.data = image_normalization(RGB24_Mat.ptr(), unscale_input.w, unscale_input.h, unscale_input.c);
+	/*original_image keeps to interleaved, since it is used to draw the box directly*/
+	image original_image;
+	original_image.w = w ; 
+	original_image.h = h ;
+	original_image.c = 3 ;
+	original_image.data = image_normalization(RGB24_Mat.ptr(), original_image.w, original_image.h, original_image.c);
+	original_image.c_type = INTERLEAVED;
 
 	time=clock();
 	network_predict(net, resized.data);
@@ -225,29 +222,102 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0); 
 	if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms); /*eliminate the similar box and only left 1 box*/
 
-	draw_detections(unscale_input, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
+	draw_detections(original_image, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
 
 	printf("exclude darwing fb time in %f seconds.\n", sec(clock()-overall));
 
-	image_denormalize(&unscale_input);
-	rgb2yuv422(&unscale_input, fb);
+	image_denormalize(&original_image);
+	rgb2yuv422(&original_image, fb);
 
 	printf("overall time in %f seconds.\n", sec(clock()-overall));
-	
+
+	write_raw_image(original_image.data ,"bonding_rgb_640480_car.raw",w*h*3);	
+
+#ifdef DEBUG
+	/*image should be plannar and normalized*/
+    save_image(resized, "predictions");
+    show_image(resized, "predictions");	
+	write_raw_image(original_image.data ,"bonding_rgb_640480_car.raw",w*h*3);
 	write_raw_image(fb,"fb_yuyv422_640480_car.raw",w*h*2 );
-	write_raw_image(unscale_input.data ,"bonding_rgb_640480_car.raw",w*h*3);
-
-
-	save_image(unscale_input, "predictions");
-	show_image(unscale_input, "predictions");
 #ifdef OPENCV
         cvWaitKey(0);
         cvDestroyAllWindows();
 #endif
-
-	free_image(unscale_input);
+#endif
+	free_image(original_image);
 	free_image(resized);
 
+}
+
+static void set_pixel_inter(image m, int x, int y, int c, float val) 
+{
+    if (x < 0 || y < 0 || c < 0 || x >= m.w || y >= m.h || c >= m.c) return;
+    assert(x < m.w && y < m.h && c < m.c);
+   // m.data[c*m.h*m.w + y*m.w + x] = val; 
+	m.data[y*m.w*m.c + x*m.c + m.c] = val; 
+}
+
+static float get_pixel(image m, int x, int y, int c)
+{
+    assert(x < m.w && y < m.h && c < m.c);
+    return m.data[c*m.h*m.w + y*m.w + x];
+}
+
+void draw_label_inter(image a, int r, int c, image label, const float *rgb)
+{
+    int w = label.w;
+    int h = label.h;
+
+    if (r - h >= 0) r = r - h; 
+
+
+    int i, j, k;
+    for(j = 0; j < h && j + r < a.h; ++j){
+        for(i = 0; i < w && i + c < a.w; ++i){
+            for(k = 0; k < label.c; ++k){
+                float val = get_pixel(label, i, j, k);
+                set_pixel_inter(a, i+c, j+r, k, rgb[k] * val);
+            }
+        }
+    }    
+}
+
+
+void draw_box_inter(image a, int x1, int y1, int x2, int y2, float r, float g, float b)
+{
+    //normalize_image(a);
+    int i;
+
+    if(x1 < 0) x1 = 0;
+    if(x1 >= a.w) x1 = a.w-1;
+    if(x2 < 0) x2 = 0;
+    if(x2 >= a.w) x2 = a.w-1;
+
+    if(y1 < 0) y1 = 0;
+    if(y1 >= a.h) y1 = a.h-1;
+    if(y2 < 0) y2 = 0;
+    if(y2 >= a.h) y2 = a.h-1;
+
+    for(i = x1; i <= x2; ++i){
+        a.data[0 + i*a.c + y1*a.w*a.c] = r;
+        a.data[0 + i*a.c + y2*a.w*a.c] = r;
+
+        a.data[1 + i*a.c + y1*a.w*a.c] = g;
+        a.data[1 + i*a.c + y2*a.w*a.c] = g;
+
+        a.data[2 + i*a.c + y1*a.w*a.c] = b;
+        a.data[2 + i*a.c + y2*a.w*a.c] = b;
+    }
+    for(i = y1; i <= y2; ++i){
+        a.data[0 + x1*a.c + i*a.w*a.c] = r;
+        a.data[0 + x2*a.c + i*a.w*a.c] = r;
+
+        a.data[1 + x1*a.c + i*a.w*a.c] = g;
+        a.data[1 + x2*a.c + i*a.w*a.c] = g;
+
+        a.data[2 + x1*a.c + i*a.w*a.c] = b;
+        a.data[2 + x2*a.c + i*a.w*a.c] = b;
+    }
 }
 
 
@@ -273,8 +343,8 @@ static void rgb2yuv422(image *src, void *fb)
 	unsigned char *ULine = (new unsigned char[src_width+2])+1;
 	unsigned char *VLine = (new unsigned char[src_width+2])+1;
 
-	ULine[-1]=ULine[512]=128;
-	VLine[-1]=VLine[512]=128;
+	ULine[-1]=ULine[src_width]=128;
+	VLine[-1]=VLine[src_width]=128;
 
 	for (i=0; i<src_height; i++)
 	{
@@ -310,7 +380,7 @@ static void rgb2yuv422(image *src, void *fb)
 	unsigned char *p = fb;
 	YIndex = UVIndex = 0;	
 
-	for(j=0; j < input_size; j += 2)
+	for(j=0; j < input_size*2 ; j += 4)
 	{
 		p[j] = YBuffer[YIndex++];
 		p[j+1] = UBuffer[UVIndex];

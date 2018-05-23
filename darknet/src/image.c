@@ -149,6 +149,14 @@ void draw_label(image a, int r, int c, image label, const float *rgb)
 {
     int w = label.w;
     int h = label.h;
+
+
+	if(a.c_type==INTERLEAVED)
+	{
+		draw_label_inter(a, r, c, label, rgb);
+		return;
+	}
+
     if (r - h >= 0) r = r - h;
 
     int i, j, k;
@@ -166,6 +174,13 @@ void draw_box(image a, int x1, int y1, int x2, int y2, float r, float g, float b
 {
     //normalize_image(a);
     int i;
+
+	if(a.c_type == INTERLEAVED)
+	{
+		draw_box_inter(a, x1, y1, x2, y2, r, g, b);
+		return;
+	}
+
     if(x1 < 0) x1 = 0;
     if(x1 >= a.w) x1 = a.w-1;
     if(x2 < 0) x2 = 0;
@@ -257,7 +272,6 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
         }
         if(class >= 0){
             int width = im.h * .006;
-
             /*
                if(0){
                width = pow(prob, 1./2.)*10+1;
@@ -284,6 +298,7 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
             int top   = (b.y-b.h/2.)*im.h;
             int bot   = (b.y+b.h/2.)*im.h;
 
+
             if(left < 0) left = 0;
             if(right > im.w-1) right = im.w-1;
             if(top < 0) top = 0;
@@ -297,8 +312,10 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
             draw_box_width(im, left, top, right, bot, width, red, green, blue);
             if (alphabet) {
                 image label = get_label(alphabet, labelstr, (im.h*.03)/10);
+				printf("topw = %d\n", top + width);
+				printf("top = %d\n", top);
                 draw_label(im, top + width, left, label, rgb);
-                free_image(label);
+				free_image(label);
             }
             if (masks){
                 image mask = float_to_image(14, 14, 1, masks[i]);
