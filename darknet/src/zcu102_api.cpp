@@ -18,7 +18,7 @@ static void rgb2yuv422(image *src, void *fb);
 static network *net;
 void setup_yolo_env(char *cfgfile, char *weightfile)
 {
-	printf("setup yolo_env\n");
+	dector_printf("setup yolo_env\n");
 	net = load_network(cfgfile, weightfile, 0);
     set_batch_network(net, 1);
 	alphabet = load_alphabet();
@@ -66,7 +66,7 @@ float *yolo_inference(float thresh)
 	float *X = sized.data;
 	time=clock();
 	network_predict(net, X);
-	printf("%s: Predicted in %f seconds.\n", net->cur_im.name, sec(clock()-time));
+	dector_printf("%s: Predicted in %f seconds.\n", net->cur_im.name, sec(clock()-time));
 	return l.output;
 }
 
@@ -111,7 +111,7 @@ void validate_zcu102(int argc, char **argv)
 
     width = atoi(strtok(res, "x"));
     height = atoi(strtok(NULL, "x"));
-	printf("%s, %dx%d\n", file, width,height);
+	dector_printf("%s, %dx%d\n", file, width,height);
 
    /*
      * Set up YUV422 input image.
@@ -129,7 +129,7 @@ void validate_zcu102(int argc, char **argv)
     yuv422_data = malloc(f_size);
     ret = fread(yuv422_data, 1, f_size, fp);
 
-    printf("read %ld bytes, error %d\n", ret, ferror (fp));
+    dector_printf("read %ld bytes, error %d\n", ret, ferror (fp));
     fclose(fp);
 
     setup_yolo_env(argv[4], argv[5]);
@@ -181,7 +181,7 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	Mat Resize_Mat(net->h, net->w,CV_8UC3, resiz_data);
 	resize(RGB24_Mat, Resize_Mat, Size(net->h, net->w));
 
-	printf("%d,%d,%d\n", net->h, net->w, net->c);
+	dector_printf("%d,%d,%d\n", net->h, net->w, net->c);
 	
 #ifdef DEBUG
 	write_raw_image(yuv422_data,"yuv422_640480_car_conv.raw",w*h*2 );
@@ -216,12 +216,12 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 
 	time=clock();
 	network_predict(net, resized.data);
-	printf("%d,%d,%d\n", net->w, net->h, net->c);
 	printf("Predicted in %f seconds.\n", sec(clock()-time));
 
 	get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0); 
 	if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms); /*eliminate the similar box and only left 1 box*/
-
+	printf("exclude darwing  time in %f seconds.\n", sec(clock()-overall));
+	
 	draw_detections(original_image, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
 
 	printf("exclude darwing fb time in %f seconds.\n", sec(clock()-overall));
@@ -230,17 +230,19 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	rgb2yuv422(&original_image, fb);
 
 	printf("overall time in %f seconds.\n", sec(clock()-overall));
-
-	write_raw_image(original_image.data ,"bonding_rgb_640480_car.raw",w*h*3);	
+#if defined(__ARM_ARCH)
+	write_raw_image(fb,"/media/card/fb_yuyv422_640480_car.raw",w*h*2 );
+#else
 	write_raw_image(fb,"fb_yuyv422_640480_car.raw",w*h*2 );
-
+#endif
 #ifdef DEBUG
 	/*image should be plannar and normalized*/
-    save_image(resized, "predictions");
-    show_image(resized, "predictions");	
 	write_raw_image(original_image.data ,"bonding_rgb_640480_car.raw",w*h*3);
 	write_raw_image(fb,"fb_yuyv422_640480_car.raw",w*h*2 );
-#ifdef OPENCV
+	write_raw_image(original_image.data ,"bonding_rgb_640480_car.raw",w*h*3);	
+#if defined(OPENCV) && !defined(__ARM_ARCH)
+    	save_image(resized, "predictions");
+    	show_image(resized, "predictions");	
         cvWaitKey(0);
         cvDestroyAllWindows();
 #endif
@@ -248,6 +250,7 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	free_image(original_image);
 	free_image(resized);
 
+	return 0;
 }
 
 static void set_pixel_inter(image m, int x, int y, int c, float val) 

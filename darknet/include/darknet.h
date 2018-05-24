@@ -8,6 +8,16 @@
 #define SECRET_NUM -1234
 extern int gpu_index;
 
+#define DEBUG_PRINT (0)
+#define HEADER "[OBJ_DECTOR]: "
+
+#if (DEBUG_PRINT)
+#define dector_printf(X...) printf(HEADER X)
+#else
+#define dector_printf(X...)
+#endif
+
+
 #ifdef GPU
     #define BLOCK 512
 
