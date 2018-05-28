@@ -16,7 +16,7 @@ The repo is still under development. Here is developing features:
 7. support PCA for trainning and inference [planning]
 8. acceleration connected layer and img2col() [planning]
 
-You can do what the fuck you want, but limited for research. 
+You can do anything you want, but limited for research. 
 If it helps you, please cite it!  :)
 
 
