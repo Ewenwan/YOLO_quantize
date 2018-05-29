@@ -5,12 +5,13 @@
 #include <vector>
 #include <opencv2/opencv.hpp>
 #include <yolo_lib.h>
+#include <sys/time.h>
 
 using namespace cv;
 
 static image **alphabet;
 
-static const char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
+static char *voc_names[] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
 
 
 static void rgb2yuv422(image *src, void *fb);
@@ -19,11 +20,13 @@ static network *net;
 void setup_yolo_env(char *cfgfile, char *weightfile)
 {
 	dector_printf("setup yolo_env\n");
+
 	net = load_network(cfgfile, weightfile, 0);
     set_batch_network(net, 1);
 	alphabet = load_alphabet();
-}
 
+}
+#if 0
 void set_cur_img_by_name(char *filename)
 {
 	char *p;
@@ -32,20 +35,20 @@ void set_cur_img_by_name(char *filename)
 	strncpy(net->cur_im.name, filename, 256);
 	return;
 }
-
+#endif
 static float *image_normalization(void *p, int w, int h, int c)
 {
 	int i,j,k;
-	char *char_data = p;
+	char *char_data = (char *)p;
 
-	float *data = malloc(sizeof(float)*w*h*c);
+	float *data = (float *)malloc(sizeof(float)*w*h*c);
 	for(k = 0; k < c*h*w; ++k){
                 data[k] = (float)char_data[k]/255.;
     }    
 
 	return data;
 }
-
+#if 0
 void set_cur_img(unsigned char *data, int w, int h, int c, const char *name)
 {
 	net->cur_im.data= (float *)data;
@@ -54,8 +57,8 @@ void set_cur_img(unsigned char *data, int w, int h, int c, const char *name)
 	strncpy((net->cur_im.name), name, 256);
 	return;
 }
-
-
+#endif
+#if 0
 float *yolo_inference(float thresh)
 {
 
@@ -69,7 +72,7 @@ float *yolo_inference(float thresh)
 	dector_printf("%s: Predicted in %f seconds.\n", net->cur_im.name, sec(clock()-time));
 	return l.output;
 }
-
+#endif
 
 void write_jpeg(Mat &a, const char *filename)
 {
@@ -88,7 +91,6 @@ void write_raw_image(void *raw_image,const char *filename, unsigned int size)
 
 }
 
-
 void validate_zcu102(int argc, char **argv)
 {
     int width;
@@ -104,12 +106,11 @@ void validate_zcu102(int argc, char **argv)
     if(argc < 6){
         fprintf(stderr, "usage: ./darknet zcu102 [input] [input resolution]\n");
         fprintf(stderr, "ex: ./darknet zcu102 resource/yuyv422_640480_car.yuv  640x480\n");
-        return 0;
     }
 
 
 
-    width = atoi(strtok(res, "x"));
+    width = atoi(strtok((char *)res, "x"));
     height = atoi(strtok(NULL, "x"));
 	dector_printf("%s, %dx%d\n", file, width,height);
 
@@ -134,21 +135,32 @@ void validate_zcu102(int argc, char **argv)
 
     setup_yolo_env(argv[4], argv[5]);
 
-	framebuffer = malloc(f_size);
+#ifdef NNPACK
+    nnp_initialize();
+	net->threadpool = pthreadpool_create(2);
+#endif
 
+	framebuffer = malloc(f_size);
     yolo_inference_with_ptr(yuv422_data, width, height, 2, 0.2, framebuffer);
+#ifdef NNPACK
+	pthreadpool_destroy(net->threadpool);
+    nnp_deinitialize();
+#endif
 
 }
 
-static image_denormalize(image *im)
+
+static void image_denormalize(image *im)
 {
 	int i = 0;
 	void *v;
 	char *p;
 
-	p = (void *)im->data;
+	p = (char *)im->data;
 	for(i = 0 ; i < im->h * im->w * im->c ; i++)
 		p[i] = (char)(im->data[i] * 255);
+
+	return;
 }
 
 
@@ -160,14 +172,17 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
     void *resiz_data;
 	clock_t time;
 	clock_t overall;
+	struct timeval start, stop;
 
+	gettimeofday(&start, 0);
 	overall = clock();
 
 	layer l = net->layers[net->n-1];
     float nms=.4;
-    box *boxes = calloc(l.side*l.side*l.n, sizeof(box));
-    float **probs = calloc(l.side*l.side*l.n, sizeof(float *));
-    for(int j = 0; j < l.side*l.side*l.n; ++j) probs[j] = calloc(l.classes, sizeof(float *));
+    box *boxes = (box *)calloc(l.side*l.side*l.n, sizeof(box));
+    float **probs = (float **)calloc(l.side*l.side*l.n, sizeof(float *));
+    for(int j = 0; j < l.side*l.side*l.n; ++j)
+		probs[j] = (float *)calloc(l.classes, sizeof(float));
 
 
 	yuv422_data = ptr;
@@ -176,13 +191,13 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	rgb24_data = malloc(h*w*3);
 	Mat RGB24_Mat(h ,w ,CV_8UC3,rgb24_data);
 	cvtColor(YUV422_Mat, RGB24_Mat, COLOR_YUV2RGB_YUYV);
+	dector_printf("RGB conversion point %fs.\n", sec(clock()-overall));
 
 	resiz_data = malloc(net->h*net->w*net->c);
 	Mat Resize_Mat(net->h, net->w,CV_8UC3, resiz_data);
 	resize(RGB24_Mat, Resize_Mat, Size(net->h, net->w));
+	dector_printf("resize point %fs.\n", sec(clock()-overall));
 
-	dector_printf("%d,%d,%d\n", net->h, net->w, net->c);
-	
 #ifdef DEBUG
 	write_raw_image(yuv422_data,"yuv422_640480_car_conv.raw",w*h*2 );
 	write_raw_image(rgb24_data,"rgb24_640480_car_conv.raw",w*h*3 );
@@ -205,7 +220,7 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	*/
 	IplImage *img = new IplImage(Resize_Mat);
 	image resized = ipl_to_image(img);
-
+	dector_printf("planarlized point %fs.\n", sec(clock()-overall));
 	/*original_image keeps to interleaved, since it is used to draw the box directly*/
 	image original_image;
 	original_image.w = w ; 
@@ -213,23 +228,28 @@ int yolo_inference_with_ptr(void *ptr, int w, int h, int c, float thresh, void *
 	original_image.c = 3 ;
 	original_image.data = image_normalization(RGB24_Mat.ptr(), original_image.w, original_image.h, original_image.c);
 	original_image.c_type = INTERLEAVED;
+	dector_printf("pre-processing takes %f seconds.\n", sec(clock()-overall));
 
 	time=clock();
 	network_predict(net, resized.data);
-	printf("Predicted in %f seconds.\n", sec(clock()-time));
+	dector_printf("Predicted in %f seconds.\n", sec(clock()-time));
 
 	get_detection_boxes(l, 1, 1, thresh, probs, boxes, 0); 
+
+	dector_printf("get box point %fs.\n", sec(clock()-overall));
 	if (nms) do_nms_sort(boxes, probs, l.side*l.side*l.n, l.classes, nms); /*eliminate the similar box and only left 1 box*/
-	printf("exclude darwing  time in %f seconds.\n", sec(clock()-overall));
+	dector_printf("nms point %fs.\n", sec(clock()-overall));
 	
 	draw_detections(original_image, l.side*l.side*l.n, thresh, boxes, probs, 0, voc_names, alphabet, 20);
 
-	printf("exclude darwing fb time in %f seconds.\n", sec(clock()-overall));
+	dector_printf("draw box point %fs.\n", sec(clock()-overall));
 
 	image_denormalize(&original_image);
 	rgb2yuv422(&original_image, fb);
 
 	printf("overall time in %f seconds.\n", sec(clock()-overall));
+	gettimeofday(&stop, 0);
+	printf("Predicted in %ld ms.\n", (stop.tv_sec * 1000 + stop.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000));
 #if defined(__ARM_ARCH)
 	write_raw_image(fb,"/media/card/fb_yuyv422_640480_car.raw",w*h*2 );
 #else
@@ -339,7 +359,7 @@ static void rgb2yuv422(image *src, void *fb)
 
 	input_size = src_width * src_height;
 
-	unsigned char *RGBBuffer = (void *)src->data;
+	unsigned char *RGBBuffer = (unsigned char *)src->data;
 	unsigned char *yuyvBuffer;
 	unsigned char *YBuffer = new unsigned char[input_size];
 	unsigned char *UBuffer = new unsigned char[input_size/2];
@@ -381,7 +401,7 @@ static void rgb2yuv422(image *src, void *fb)
 		}
 	}
 	YIndex = 0;
-	unsigned char *p = fb;
+	unsigned char *p = (unsigned char *)fb;
 	YIndex = UVIndex = 0;	
 
 	for(j=0; j < input_size*2 ; j += 4)

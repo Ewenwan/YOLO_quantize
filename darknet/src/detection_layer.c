@@ -272,6 +272,89 @@ void save_prediction_files(float *data)
 }
 
 
+struct detec_arg
+{
+	layer l; 
+	int w; 
+	int h;
+	float thresh;
+	float **probs;
+	box *boxes;
+	int only_objectness;
+	int p_id;
+};
+
+void *thread_detection_boxes(struct detec_arg *d)
+{
+    int i,j,n;
+    float *predictions = d->l.output;
+
+    //int per_cell = 5*num+classes;
+
+//    save_prediction_files(predictions);
+
+    for (i = d->p_id*7; i < d->p_id*7 + 7; ++i){
+        int row = i / d->l.side;
+        int col = i % d->l.side;
+    for(n = 0; n < d->l.n; ++n){
+            int index = i*d->l.n + n; /*class..class(7*7*20),scale..scale(7*7*2),box..box(7*7*2*4)[x,y,w,h] */
+            int p_index = d->l.side*d->l.side*d->l.classes + i*d->l.n + n;
+            float scale = predictions[p_index];
+            int box_index = d->l.side*d->l.side*(d->l.classes + d->l.n) + (i*d->l.n + n)*4;
+
+            /*[Lucas review] x,y is calculated and based on 7*7 grids, so it need to divide to l.side */
+        /*[Lucas review] x,y is the offset withine a grid, so prediction[]+col/raw represents the central corrdination completly */
+            d->boxes[index].x = (predictions[box_index + 0] + col) / d->l.side * d->w;
+            d->boxes[index].y = (predictions[box_index + 1] + row) / d->l.side * d->h;
+            d->boxes[index].w = pow(predictions[box_index + 2], (d->l.sqrt?2:1)) * d->w;
+            d->boxes[index].h = pow(predictions[box_index + 3], (d->l.sqrt?2:1)) * d->h;
+            for(j = 0; j < d->l.classes; ++j){
+                int class_index = i*d->l.classes;
+                float prob = scale*predictions[class_index+j];
+                d->probs[index][j] = (prob > d->thresh) ? prob : 0;/* a array carries all prob(class)*confidence for each box. e.g.  [box][class], each element is prob(class)*con */
+            }
+
+            if(d->only_objectness){
+                d->probs[index][0] = scale;
+            }
+        }
+    }   
+
+}
+
+
+
+
+
+void get_detection_boxes_threaded(layer l, int w, int h, float thresh, float **probs, box *boxes, int only_objectness)
+{
+	int i;
+	int ret;
+	struct detec_arg *arg = calloc(7, sizeof(struct detec_arg));
+	pthread_t *threads = calloc(7, sizeof(pthread_t));
+
+	for (i = 0; i < l.side; ++i)
+	{
+		arg[i].l = l;
+		arg[i].w=w;
+		arg[i].h=h;
+		arg[i].thresh=thresh;
+		arg[i].probs=probs;
+		arg[i].boxes=boxes;
+		arg[i].only_objectness=only_objectness;
+		arg[i].p_id=i;
+        ret = pthread_create(&threads[i], 0, thread_detection_boxes, &arg[i]);
+        if(ret)
+            error("[EIGEN] Thread creation failed");
+	}
+
+    for(i = 0; i < 7; i++){
+            pthread_join(threads[i], 0);
+    }
+    free(arg);
+    free(threads);	
+}
+
 void get_detection_boxes(layer l, int w, int h, float thresh, float **probs, box *boxes, int only_objectness)
 {
     int i,j,n;
@@ -279,6 +362,7 @@ void get_detection_boxes(layer l, int w, int h, float thresh, float **probs, box
     //int per_cell = 5*num+classes;
 
 //    save_prediction_files(predictions);
+
 
     for (i = 0; i < l.side*l.side; ++i){
         int row = i / l.side;
@@ -300,13 +384,13 @@ void get_detection_boxes(layer l, int w, int h, float thresh, float **probs, box
                 float prob = scale*predictions[class_index+j];
                 probs[index][j] = (prob > thresh) ? prob : 0;/* a array carries all prob(class)*confidence for each box. e.g.  [box][class], each element is prob(class)*con */
             }
+
             if(only_objectness){
                 probs[index][0] = scale;
             }
         }
     }
 }
-
 #ifdef GPU
 
 void forward_detection_layer_gpu(const detection_layer l, network net)

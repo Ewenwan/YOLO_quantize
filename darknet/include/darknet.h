@@ -595,7 +595,9 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
 void save_image(image p, const char *name);
 void free_image(image m);
 void show_image(image p, const char *name);
+#ifdef OPENCV
 image ipl_to_image(IplImage* src);
+#endif
 void draw_label_inter(image a, int r, int c, image label, const float *rgb);
 void draw_box_inter(image a, int x1, int y1, int x2, int y2, float r, float g, float b);
 

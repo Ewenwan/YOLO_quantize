@@ -150,13 +150,13 @@ void draw_label(image a, int r, int c, image label, const float *rgb)
     int w = label.w;
     int h = label.h;
 
-
+#ifdef OPENCV
 	if(a.c_type==INTERLEAVED)
 	{
 		draw_label_inter(a, r, c, label, rgb);
 		return;
 	}
-
+#endif
     if (r - h >= 0) r = r - h;
 
     int i, j, k;
@@ -175,11 +175,13 @@ void draw_box(image a, int x1, int y1, int x2, int y2, float r, float g, float b
     //normalize_image(a);
     int i;
 
+#ifdef OPENCV
 	if(a.c_type == INTERLEAVED)
 	{
 		draw_box_inter(a, x1, y1, x2, y2, r, g, b);
 		return;
 	}
+#endif
 
     if(x1 < 0) x1 = 0;
     if(x1 >= a.w) x1 = a.w-1;
