@@ -23,3 +23,5 @@ If it helps you, please cite it!  :)
 
 
 
+[电子创新网 赛灵思中文社区](http://xilinx.eetrend.com/)
+
